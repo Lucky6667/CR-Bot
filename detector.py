@@ -54,7 +54,13 @@ def is_magenta_pixel(rgb):
 def is_tray_blue_pixel(rgb):
     """Checks if RGB matches the blue top border of the player battle tray."""
     r, g, b = rgb[:3]
-    return b > 160 and g > 110 and r < 100
+    return b > 150 and g > 100 and r < 110
+
+
+def is_dark_dialog_pixel(rgb):
+    """Checks if RGB matches the dark charcoal background of the system dialog card."""
+    r, g, b = rgb[:3]
+    return r <= 45 and g <= 45 and b <= 45 and abs(r - g) <= 10 and abs(r - b) <= 10
 
 
 def is_main_menu(img):
@@ -162,12 +168,13 @@ def is_in_battle(img):
     ]
     drop_hits = sum(1 for p in elixir_pts if is_magenta_pixel(img.getpixel(p)))
 
-    # Check blue deck tray top border
+    # Check blue deck tray top border (sampled on left and right wings outside of the 4 card slots)
     tray_pts = [
-        (int(70 * sx), int(510 * sy)),
-        (int(140 * sx), int(510 * sy)),
-        (int(280 * sx), int(510 * sy)),
-        (int(350 * sx), int(510 * sy)),
+        (int(50 * sx), int(512 * sy)),
+        (int(65 * sx), int(512 * sy)),
+        (int(80 * sx), int(512 * sy)),
+        (int(380 * sx), int(512 * sy)),
+        (int(385 * sx), int(512 * sy)),
     ]
     tray_hits = sum(1 for p in tray_pts if is_tray_blue_pixel(img.getpixel(p)))
 
@@ -177,11 +184,31 @@ def is_in_battle(img):
 def is_connection_lost(img):
     """Checks if the 'Connection lost' modal popup is on screen.
 
-    Detects the cyan 'Retry login' action text and white 'Connection lost' title.
+    Verifies the dark dialog card surface, cyan 'Retry login' action text,
+    and white 'Connection lost' title. Ignores active battle HUD.
     """
+    # Active battle HUD (elixir droplet + deck tray) is never present when modal dialog covers screen
+    if is_in_battle(img):
+        return False
+
     w, h = img.size
     sx = w / BASE_WIDTH
     sy = h / BASE_HEIGHT
+
+    # Check for dark dialog card background across the modal container
+    dialog_sample_pts = [
+        (int(210 * sx), int(225 * sy)),
+        (int(300 * sx), int(230 * sy)),
+        (int(350 * sx), int(250 * sy)),
+        (int(300 * sx), int(300 * sy)),
+        (int(350 * sx), int(320 * sy)),
+        (int(300 * sx), int(350 * sy)),
+        (int(350 * sx), int(350 * sy)),
+        (int(200 * sx), int(355 * sy)),
+    ]
+    dark_hits = sum(1 for p in dialog_sample_pts if is_dark_dialog_pixel(img.getpixel(p)))
+    if dark_hits < 6:
+        return False
 
     # Check cyan pixels in 'Retry login' text box
     cyan_count = 0

@@ -43,7 +43,7 @@ def play_random_card(img_size=(419, 633)):
 
     print(f"[+] Selecting card slot at ({slot_x}, {slot_y})...")
     tap(slot_x, slot_y)
-    time.sleep(0.25)
+    time.sleep(0.15)
 
     print(f"[+] Deploying unit to arena at ({target_x}, {target_y})...")
     tap(target_x, target_y)
@@ -67,7 +67,7 @@ def bot_loop():
 
             elif state == "IN_BATTLE":
                 play_random_card(img_size=(w, h))
-                cooldown = random.uniform(3.5, 5.5)
+                cooldown = random.uniform(2.2, 3.8)
                 print(f"[~] Waiting {cooldown:.1f}s for elixir...")
                 time.sleep(cooldown)
 
