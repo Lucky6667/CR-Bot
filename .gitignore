@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+*$py.class
+screen.png
+*.png
+install.sh
+.system_generated/
