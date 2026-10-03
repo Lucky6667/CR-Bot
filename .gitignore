@@ -5,3 +5,8 @@ screen.png
 *.png
 install.sh
 .system_generated/
+.refference/
+.refference
+.reference/
+.reference
+!free_template.png
