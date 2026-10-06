@@ -1,7 +1,8 @@
 """CR-Bot: Automated Clash Royale Bot for Waydroid.
 
 Features:
-- Robust multi-screen state classification (Home, Challenges, Winner, Defeat, Connection Lost).
+- Robust multi-screen state classification (Home, Challenges, Winner, Defeat, Connection Lost, Event Roadmaps).
+- Event screen & reward roadmap auto-dismissal via blue 'Close' button detection.
 - Challenge / Event mode support with green "FREE!" retry detection and gem-cost safeguards.
 - Strategic lane management and tactical deployment zones (inspired by py-clash-bot).
 - Card affordability verification via elixir badge detection (avoids dead taps).
@@ -151,6 +152,18 @@ def run_bot():
                     okx, oky = detector.scale_point(detector.OK_BUTTON_CENTER_MIDDLE, (w, h))
                 print(f"[!] Summary/Rewards screen detected! Tapping OK at ({okx}, {oky})...")
                 tap(okx, oky)
+                time.sleep(2.0)
+
+            # 3b. EVENT / ROADMAP SCREEN: Dismiss via 'Close'
+            elif state == "EVENT_SCREEN":
+                tactics_engine.reset_match()
+                close_coords = detector.get_close_button_coords(img)
+                if close_coords:
+                    cx, cy = close_coords
+                else:
+                    cx, cy = detector.scale_point(detector.CLOSE_BUTTON_CENTER, (w, h))
+                print(f"[!] Event screen detected! Tapping 'Close' at ({cx}, {cy})...")
+                tap(cx, cy)
                 time.sleep(2.0)
 
             # 4. ACTIVE BATTLE: Tactical card play, elixir tracking, abilities & emotes

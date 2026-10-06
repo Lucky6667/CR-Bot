@@ -11,6 +11,7 @@ An automated Clash Royale bot designed to run with Waydroid via ADB. Features ro
   - **Live Combat**: Magenta elixir droplet and blue deck tray border detection (zero false positives).
   - **Rematch Navigation**: Detects yellow "Play Again" and blue "OK" buttons on victory.
   - **Defeat & Dialog Handling**: Automatically detects and taps centered blue "OK" buttons on defeat or summary popups.
+  - **Event Screen / Roadmap Dismissal**: Detects progress roadmaps and modal event screens (e.g. "Watts of Rewards!") via template and pixel matching on the blue "Close" button, automatically resuming the match loop.
 - **Tactical Combat Intelligence (`tactics.py`)** (inspired by `py-clash-bot` & `ClashRoyaleBuildABot`):
   - **Dynamic Tower Health Evaluation**: Continuously tracks enemy Princess Tower HP bars in real-time, automatically prioritizing and concentrating offensive pushes on the weaker enemy tower.
   - **Defensive Incursion Detection & Center Pull Counters**: Continuously scans friendly territory (`y: 285..440`) for enemy troop health bars; executes a classic 4-3 center pull (`defense_center`) to lure attackers between both Princess Towers when threatened.

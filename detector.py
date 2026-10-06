@@ -16,6 +16,7 @@ PLAY_AGAIN_CENTER = (153, 573)
 OK_BUTTON_CENTER_RIGHT = (265, 573)
 OK_BUTTON_CENTER_MIDDLE = (210, 574)
 OK_BUTTON_CENTER = OK_BUTTON_CENTER_RIGHT
+CLOSE_BUTTON_CENTER = (209, 598)
 RETRY_LOGIN_BUTTON = (85, 343)
 
 CARD_SLOTS = [
@@ -55,6 +56,35 @@ def _get_free_template():
     _CACHED_TMPL = tmpl
     _CACHED_NORM = norm
     return _CACHED_TMPL, _CACHED_NORM
+
+
+# Embedded base64 fallback for the 'Close' button text template (grayscale)
+CLOSE_TEMPLATE_B64 = """iVBORw0KGgoAAAANSUhEUgAAACYAAAAOCAAAAABmqTEpAAABrElEQVR4nI2QT0hTcQDHP+/33vO5vXKpYWu6iRvROkgJC4ykFhQOYh0MLOoeatCpWx0k6KBBINQhugb9uXjoD0KBVkTeCi8RjzlKmrzXXJtbe3s9t18H7+Ln/OUD34/ygt0gdrVCA6BRc33pdah0GTvYlh990Q8fL+TavuZ3sMnn7xNAMRvsXvH9UkOqvRRWS1vN4f7KD6dKc8zQgPXoAJ7152OW+ubTdDikrc4GLo/37F15vXDmRHif/uTdea0C+VHBp4tucJa/havjAlrZmRtqtWD/PnBLb8jApbERAdSOwLeTt9MC30uI3NBLER1W3enM1K8RvXnnLX0OApCdUBsKq4DooCyK0E379NIzP464eY7gv+0gLQjfjzgtaOng7UFen8wk+805A/L2mrX9VLEyXBmtz7fQXTuenI/gsLYcC9UaRTD10OejaED73KlBPUzUl1SvLfQe2vr58MI9Tebulh/EB5NJb+kYGhCpptpSA50fJg1n4lUsUbOFGZ/5vrjedXYx7fXFDSuF8hikveGU3GY9YQaSVUsqhmm+UdSDsf09G5XNsitDp/kPzfqg4UjNBdAAAAAASUVORK5CYII="""
+
+_CACHED_CLOSE_TMPL = None
+_CACHED_CLOSE_NORM = None
+
+
+def _get_close_template():
+    """Loads and caches the normalized 'Close' text template."""
+    global _CACHED_CLOSE_TMPL, _CACHED_CLOSE_NORM
+    if _CACHED_CLOSE_TMPL is not None:
+        return _CACHED_CLOSE_TMPL, _CACHED_CLOSE_NORM
+
+    template_file = os.path.join(os.path.dirname(__file__), "close_template.png")
+    if os.path.exists(template_file):
+        img = Image.open(template_file).convert("L")
+    else:
+        raw_bytes = base64.b64decode(CLOSE_TEMPLATE_B64)
+        img = Image.open(io.BytesIO(raw_bytes)).convert("L")
+
+    tmpl = np.array(img, dtype=np.float32)
+    tmpl -= tmpl.mean()
+    norm = np.linalg.norm(tmpl)
+
+    _CACHED_CLOSE_TMPL = tmpl
+    _CACHED_CLOSE_NORM = norm
+    return _CACHED_CLOSE_TMPL, _CACHED_CLOSE_NORM
 
 
 def scale_point(pt, img_size):
@@ -230,6 +260,81 @@ def is_ok_button_present(img):
     return get_ok_button_coords(img) is not None
 
 
+def get_close_button_coords(img):
+    """Locates the blue 'Close' button on an event or modal popup screen.
+
+    Combines template matching and color sampling:
+    1. Crops the bottom center region where the Close button appears.
+    2. Performs normalized cross-correlation against the 'Close' text template.
+    3. Verifies blue button border/wings and white text pixels to prevent false positives.
+    Returns (x, y) coordinates of the button center if found, else None.
+    """
+    w, h = img.size
+    sx = w / BASE_WIDTH
+    sy = h / BASE_HEIGHT
+
+    # Check multi-point blue pixels on the Close button wings/edges
+    sample_pts = [
+        (int(185 * sx), int(598 * sy)),  # left wing
+        (int(233 * sx), int(598 * sy)),  # right wing
+        (int(195 * sx), int(591 * sy)),  # top-left
+        (int(223 * sx), int(591 * sy)),  # top-right
+        (int(195 * sx), int(607 * sy)),  # bottom-left
+        (int(223 * sx), int(607 * sy)),  # bottom-right
+    ]
+    blue_hits = sum(1 for p in sample_pts if is_blue_pixel(img.getpixel(p)))
+
+    # Count white pixels in the center text area
+    white_hits = 0
+    for y in range(int(594 * sy), int(604 * sy)):
+        for x in range(int(195 * sx), int(225 * sx)):
+            r, g, b = img.getpixel((x, y))[:3]
+            if r > 200 and g > 200 and b > 200:
+                white_hits += 1
+
+    # Template matching check
+    tmpl, tmpl_norm = _get_close_template()
+    crop_x0, crop_y0 = int(160 * sx), int(570 * sy)
+    crop_x1, crop_y1 = int(260 * sx), int(625 * sy)
+    crop = img.crop((crop_x0, crop_y0, crop_x1, crop_y1))
+    crop_std = crop.resize((100, 55)).convert("L")
+    arr = np.array(crop_std, dtype=np.float32)
+
+    th, tw = tmpl.shape
+    H, W = arr.shape
+    shape = (H - th + 1, W - tw + 1, th, tw)
+    strides = (arr.strides[0], arr.strides[1], arr.strides[0], arr.strides[1])
+    windows = np.lib.stride_tricks.as_strided(arr, shape=shape, strides=strides)
+
+    win_mean = windows.mean(axis=(2, 3), keepdims=True)
+    win_sub = windows - win_mean
+    win_norm = np.linalg.norm(win_sub, axis=(2, 3))
+
+    corr = np.sum(win_sub * tmpl, axis=(2, 3))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        corr_norm = np.where(win_norm > 1e-5, corr / (win_norm * tmpl_norm), -1.0)
+
+    best_score = float(np.max(corr_norm))
+
+    # Match confirmed if template matches or blue wings + white text are detected
+    if best_score >= 0.70 and blue_hits >= 2:
+        best_idx = np.unravel_index(np.argmax(corr_norm), corr_norm.shape)
+        best_y, best_x = best_idx
+        found_x = crop_x0 + int((best_x + tw / 2) / 100.0 * (crop_x1 - crop_x0))
+        found_y = crop_y0 + int((best_y + th / 2) / 55.0 * (crop_y1 - crop_y0))
+        return (found_x, found_y)
+
+    if blue_hits >= 4 and white_hits >= 25:
+        return scale_point(CLOSE_BUTTON_CENTER, (w, h))
+
+    return None
+
+
+def is_close_button_present(img):
+    """Checks if a blue 'Close' button is present on the screen."""
+    return get_close_button_coords(img) is not None
+
+
 def is_winner_screen(img):
     """Checks if the end-of-battle screen is showing (either Play Again or OK button present)."""
     return is_play_again_present(img) or is_ok_button_present(img)
@@ -243,7 +348,7 @@ def is_in_battle(img):
     Guarantees zero false-positives on menu, winner, or loading screens.
     """
     # Ensure terminal screens are not confused with battle
-    if is_winner_screen(img) or is_main_menu(img):
+    if is_winner_screen(img) or is_main_menu(img) or is_close_button_present(img):
         return False
 
     w, h = img.size
@@ -328,6 +433,7 @@ def detect_state(img):
     - 'GREEN_PAID_BUTTON'
     - 'WINNER_SCREEN'
     - 'POST_BATTLE_OK'
+    - 'EVENT_SCREEN'
     - 'IN_BATTLE'
     - 'LOADING'
     """
@@ -343,6 +449,8 @@ def detect_state(img):
         return "WINNER_SCREEN"
     if is_ok_button_present(img):
         return "POST_BATTLE_OK"
+    if is_close_button_present(img):
+        return "EVENT_SCREEN"
     if is_in_battle(img):
         return "IN_BATTLE"
     return "LOADING"
