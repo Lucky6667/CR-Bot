@@ -15,8 +15,10 @@ BATTLE_BUTTON_CENTER = (211, 488)
 PLAY_AGAIN_CENTER = (153, 573)
 OK_BUTTON_CENTER_RIGHT = (265, 573)
 OK_BUTTON_CENTER_MIDDLE = (210, 574)
+OK_BUTTON_CENTER_BOTTOM = (210, 600)
 OK_BUTTON_CENTER = OK_BUTTON_CENTER_RIGHT
 CLOSE_BUTTON_CENTER = (209, 598)
+RED_X_BUTTON_DEFAULT = (364, 156)
 RETRY_LOGIN_BUTTON = (85, 343)
 
 CARD_SLOTS = [
@@ -87,6 +89,35 @@ def _get_close_template():
     return _CACHED_CLOSE_TMPL, _CACHED_CLOSE_NORM
 
 
+# Embedded base64 fallback for the Red 'X' close button template (grayscale)
+RED_X_TEMPLATE_B64 = """iVBORw0KGgoAAAANSUhEUgAAABUAAAASCAAAAACRecryAAABM0lEQVR4nCXOPS9DcRhA8fM8bVrSRlzpQMQgQkJE0qWCRCehn4DEYhWLwSLUbjAhBqZGY7FJDBITq5fFYiSEeq/evv7dx9D1lzMc6Ur3lwAwQADitZxMjHyEvZg2xcAVizELJ5+9BFizBUJe20tYf6LtZpX8+LlzLjdYvDWTREnLnsDRjmxccrjXken9BPH0LwKsGqxd7Cs2lkekVQMBVp4M1sH87AAgigCp5QoAQTaYAlBBYHJoDoCz8qwCaPPdPwYg8xpCAMmEIyqn+zHwtUWYn1ar11VB2Iph37tfARycAKgBbH/7fvZx6a1auImDmZoF8LH5vmCp4cXCw24SM5MZi0alcVXoScL1s9fXSaPqJK0ajeDuhwHuuttwNedkNKImooAYYAEmJeXNiTQBBAR+6/+GxHwNo1uZ4gAAAABJRU5ErkJggg=="""
+
+_CACHED_RED_X_TMPL = None
+_CACHED_RED_X_NORM = None
+
+
+def _get_red_x_template():
+    """Loads and caches the normalized Red 'X' button template."""
+    global _CACHED_RED_X_TMPL, _CACHED_RED_X_NORM
+    if _CACHED_RED_X_TMPL is not None:
+        return _CACHED_RED_X_TMPL, _CACHED_RED_X_NORM
+
+    template_file = os.path.join(os.path.dirname(__file__), "red_x_template.png")
+    if os.path.exists(template_file):
+        img = Image.open(template_file).convert("L")
+    else:
+        raw_bytes = base64.b64decode(RED_X_TEMPLATE_B64)
+        img = Image.open(io.BytesIO(raw_bytes)).convert("L")
+
+    tmpl = np.array(img, dtype=np.float32)
+    tmpl -= tmpl.mean()
+    norm = np.linalg.norm(tmpl)
+
+    _CACHED_RED_X_TMPL = tmpl
+    _CACHED_RED_X_NORM = norm
+    return _CACHED_RED_X_TMPL, _CACHED_RED_X_NORM
+
+
 def scale_point(pt, img_size):
     """Scales a reference (x, y) point to the current image dimensions."""
     w, h = img_size
@@ -111,6 +142,12 @@ def is_green_pixel(rgb):
     """Checks if RGB matches Clash Royale's bright green action button color."""
     r, g, b = rgb[:3]
     return g >= 140 and g > r * 1.2 and g > b * 1.2
+
+
+def is_red_pixel(rgb):
+    """Checks if RGB matches Clash Royale's vibrant red popup close button color."""
+    r, g, b = rgb[:3]
+    return r >= 140 and r > g * 1.4 and r > b * 1.4
 
 
 def is_magenta_pixel(rgb):
@@ -226,9 +263,10 @@ def is_play_again_present(img):
 def get_ok_button_coords(img):
     """Locates the blue 'OK' button coordinates.
 
-    Supports both:
+    Supports:
     1. Right-aligned 'OK' (when 'Play Again' is shown on victory/rematch screens).
-    2. Centered 'OK' (shown on defeat, when rematch is unavailable, or summary screens).
+    2. Centered 'OK' (shown on defeat, when rematch is unavailable, or summary screens at y=574).
+    3. Bottom-centered 'OK' (shown on event milestone / summary screens at y=600).
     """
     w, h = img.size
     sx = w / BASE_WIDTH
@@ -251,6 +289,15 @@ def get_ok_button_coords(img):
     ]
     if is_blue_pixel(img.getpixel(center_top)) and any(is_blue_pixel(img.getpixel(p)) for p in center_pts):
         return (int(OK_BUTTON_CENTER_MIDDLE[0] * sx), int(OK_BUTTON_CENTER_MIDDLE[1] * sy))
+
+    # Check bottom-centered OK points (top anchor (210, 594) must be blue)
+    bottom_center_top = (int(210 * sx), int(594 * sy))
+    bottom_center_pts = [
+        (int(185 * sx), int(600 * sy)),
+        (int(235 * sx), int(600 * sy)),
+    ]
+    if is_blue_pixel(img.getpixel(bottom_center_top)) and any(is_blue_pixel(img.getpixel(p)) for p in bottom_center_pts):
+        return (int(OK_BUTTON_CENTER_BOTTOM[0] * sx), int(OK_BUTTON_CENTER_BOTTOM[1] * sy))
 
     return None
 
@@ -335,6 +382,62 @@ def is_close_button_present(img):
     return get_close_button_coords(img) is not None
 
 
+def get_red_x_coords(img):
+    """Locates the red 'X' close button on popup modal dialogs.
+
+    Searches the upper-right header region of modals via normalized
+    template matching and verifies red pixel concentration.
+    Returns (x, y) coordinates of the button center if found, else None.
+    """
+    w, h = img.size
+    sx = w / BASE_WIDTH
+    sy = h / BASE_HEIGHT
+
+    crop_x0, crop_y0 = int(320 * sx), int(20 * sy)
+    crop_x1, crop_y1 = int(395 * sx), int(320 * sy)
+    crop = img.crop((crop_x0, crop_y0, crop_x1, crop_y1))
+    crop_std = crop.resize((75, 300)).convert("L")
+    arr = np.array(crop_std, dtype=np.float32)
+
+    tmpl, tmpl_norm = _get_red_x_template()
+    th, tw = tmpl.shape
+    H, W = arr.shape
+    shape = (H - th + 1, W - tw + 1, th, tw)
+    strides = (arr.strides[0], arr.strides[1], arr.strides[0], arr.strides[1])
+    windows = np.lib.stride_tricks.as_strided(arr, shape=shape, strides=strides)
+
+    win_mean = windows.mean(axis=(2, 3), keepdims=True)
+    win_sub = windows - win_mean
+    win_norm = np.linalg.norm(win_sub, axis=(2, 3))
+
+    corr = np.sum(win_sub * tmpl, axis=(2, 3))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        corr_norm = np.where(win_norm > 1e-5, corr / (win_norm * tmpl_norm), -1.0)
+
+    best_score = float(np.max(corr_norm))
+    best_idx = np.unravel_index(np.argmax(corr_norm), corr_norm.shape)
+    best_y, best_x = best_idx
+
+    found_cx = crop_x0 + int((best_x + tw / 2) / 75.0 * (crop_x1 - crop_x0))
+    found_cy = crop_y0 + int((best_y + th / 2) / 300.0 * (crop_y1 - crop_y0))
+
+    rad_x = max(6, int(12 * sx))
+    rad_y = max(6, int(12 * sy))
+    sub_box = img.crop((found_cx - rad_x, found_cy - rad_y, found_cx + rad_x, found_cy + rad_y))
+    red_count = sum(1 for p in sub_box.getdata() if is_red_pixel(p))
+
+    min_red = max(10, int(15 * sx * sy))
+    if best_score >= 0.70 and red_count >= min_red:
+        return (found_cx, found_cy)
+
+    return None
+
+
+def is_red_x_present(img):
+    """Checks if a red 'X' close button is present on the screen."""
+    return get_red_x_coords(img) is not None
+
+
 def is_winner_screen(img):
     """Checks if the end-of-battle screen is showing (either Play Again or OK button present)."""
     return is_play_again_present(img) or is_ok_button_present(img)
@@ -348,7 +451,7 @@ def is_in_battle(img):
     Guarantees zero false-positives on menu, winner, or loading screens.
     """
     # Ensure terminal screens are not confused with battle
-    if is_winner_screen(img) or is_main_menu(img) or is_close_button_present(img):
+    if is_winner_screen(img) or is_main_menu(img) or is_close_button_present(img) or is_red_x_present(img):
         return False
 
     w, h = img.size
@@ -432,6 +535,7 @@ def detect_state(img):
     - 'GREEN_FREE_BUTTON'
     - 'GREEN_PAID_BUTTON'
     - 'WINNER_SCREEN'
+    - 'POPUP_DISMISS'
     - 'POST_BATTLE_OK'
     - 'EVENT_SCREEN'
     - 'IN_BATTLE'
@@ -447,6 +551,8 @@ def detect_state(img):
         return "GREEN_PAID_BUTTON"
     if is_play_again_present(img):
         return "WINNER_SCREEN"
+    if is_red_x_present(img):
+        return "POPUP_DISMISS"
     if is_ok_button_present(img):
         return "POST_BATTLE_OK"
     if is_close_button_present(img):
